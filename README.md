@@ -3,6 +3,7 @@
 
 ![MIT License](https://img.shields.io/badge/license-MIT-blue) [![Public beta](https://img.shields.io/badge/stability-public_beta-orange)](https://gist.github.com/gdyr/2e54d8afb39d4ea789b4830603ca34b2) [![Uses unstable undocumented features](https://img.shields.io/badge/support-unstable-red)](https://gist.github.com/gdyr/2e54d8afb39d4ea789b4830603ca34b2)
 
+
 This PowerShell module provides a collection of CmdLets for managing QSC's Q-SYS cores, including:
 
  - Retrieving core details & status information
@@ -14,6 +15,11 @@ This PowerShell module provides a collection of CmdLets for managing QSC's Q-SYS
  - Restarting the core
 
 These CmdLets have been developed and tested against Q-SYS firmware version 9.0.1, and are expected to work with the versions immediately prior and thereafter.
+
+## Installation
+```powershell
+Install-Module -Name PS-QSYS -AllowPrerelease
+```
 
 ## CmdLet Reference
 
