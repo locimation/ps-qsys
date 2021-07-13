@@ -1,7 +1,7 @@
 # PS-QSYS (BETA)
 *A PowerShell module for managing QSC's Q-SYS cores.*
 
-![MIT License](https://img.shields.io/badge/license-MIT-blue) [![Public beta](https://img.shields.io/badge/stability-public_beta-orange)](https://gist.github.com/gdyr/2e54d8afb39d4ea789b4830603ca34b2) [![Uses unstable undocumented features](https://img.shields.io/badge/support-unstable-red)](https://gist.github.com/gdyr/2e54d8afb39d4ea789b4830603ca34b2)
+![MIT License](https://img.shields.io/badge/license-MIT-blue) [![beta](https://img.shields.io/badge/stability-beta-yellow)](https://gist.github.com/gdyr/2e54d8afb39d4ea789b4830603ca34b2) [![Uses unstable undocumented features](https://img.shields.io/badge/support-unstable-red)](https://gist.github.com/gdyr/2e54d8afb39d4ea789b4830603ca34b2)
 
 
 This PowerShell module provides a collection of CmdLets for managing QSC's Q-SYS cores, including:
