@@ -287,7 +287,7 @@ LLDPPortNumber :
 #>
 
     param([Parameter(mandatory)] [QSYS_Session] $Session)
-    _INT_GetNetConfig -Session $core | Select -ExpandProperty interfaces | Select -Property `
+    _INT_GetNetConfig -Session $Session | Select -ExpandProperty interfaces | Select -Property `
         @{ Name = 'Name'; Expression = {$_.name} },
         @{ Name = 'Mode'; Expression = {$_.mode} },
         @{ Name = 'IPAddress'; Expression = {$_.ipAddress} },
