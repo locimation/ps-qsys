@@ -27,6 +27,7 @@
     ) {
 
         try {
+            #[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
             if($this.SkipCertificateCheck) {
                 [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true} ;
             }
@@ -40,6 +41,7 @@
             }
 
             return Invoke-RestMethod `
+                -DisableKeepAlive `
                 -Uri ($this.BaseUri() + $EP) `
                 -Method $Method `
                 -Body ($body | ConvertTo-Json -Depth 100) `
@@ -64,22 +66,28 @@
 
     [PSCustomObject] UploadDesign(
         [String] $DesignCode,
+        [String] $DesignName,
         [String] $FilePath
     ) {
 
         $Content = [System.Net.Http.MultipartFormDataContent]::new();
-        #$Content.Headers.Add("Accept", "application/json");
         $FileStream = [System.IO.File]::OpenRead($FilePath);
+
         $FileContent = [System.Net.Http.StreamContent]::new($FileStream);
         $FileContent.Headers.ContentType = "application/gzip";
-        $TextContent = [System.Net.Http.StringContent]::new("untitled-design");
+        $FileContent.Headers.ContentDisposition = 'form-data; name="designtar"; filename="${DesignCode}.tar.gz"'
+
+        $TextContent = [System.Net.Http.StringContent]::new($DesignName, [System.Text.Encoding]::ASCII);
+        $TextContent.Headers.ContentType = "text/plain";
+        $TextContent.Headers.ContentDisposition = 'form-data; name="prettyname"';
+
         $Content.Add($TextContent, "prettyname");
         $Content.Add($FileContent, "designtar", $DesignCode + ".tar.gz");
 
         $result = $this.HttpClient.PutAsync($this.BaseUri() + "/api-qsd/v0/designs/" + $DesignCode, $Content).Result;
         $result.EnsureSuccessStatusCode();
         
-        return $result;
+        return $result.IsSuccessStatusCode;
 
     }
 
@@ -1300,7 +1308,7 @@ Function _INT_SetQSYSDesignState {
         [Parameter(ParameterSetName="Stop", mandatory)] [switch] $Stop
     );
 
-    $DesignCode = Get-QSYSDesignState -Session $Session | select -ExpandProperty code;
+    $DesignCode = _INT_GetQSYSDesignState -Session $Session | select -ExpandProperty code;
 
     $RequestBody;
 
@@ -1315,7 +1323,7 @@ Function _INT_SetQSYSDesignState {
 Function _INT_StopDesign {
     param([Parameter(mandatory)] [QSYS_Session] $Session)
     Write-Host -NoNewline "Waiting for design to stop...";
-    _INT_SetDesignState -Session $Session -Stop | Out-Null;
+    _INT_SetQSYSDesignState -Session $Session -Stop | Out-Null;
     $WaitCycles = 50;
     $DesignState | Out-Null;
     while($WaitCycles -gt 0) {
@@ -1332,6 +1340,65 @@ Function _INT_StopDesign {
         Write-Output " timed out.";
     }
 
+}
+
+Function _INT_StartDesign {
+    param([Parameter(mandatory)] [QSYS_Session] $Session)
+    Write-Host -NoNewline "Waiting for design to start...";
+    _INT_SetQSYSDesignState -Session $Session -Start | Out-Null;
+    $WaitCycles = 50;
+    $DesignState | Out-Null;
+    while($WaitCycles -gt 0) {
+        Write-Host -NoNewline ".";
+        $DesignState = _INT_GetQSYSDesignState -Session $core | select -ExpandProperty stateId;
+        if($DesignState -eq 2) { break; }
+        Start-Sleep -Seconds 1;
+        $WaitCycles--;
+    }
+
+    if($DesignState -eq 2) {
+        Write-Output " done";
+    } else {
+        Write-Output " timed out.";
+    }
+}
+
+
+
+<#
+$Package = $TempDir+"\designpackage.tar.gz";
+[System.Reflection.Assembly]::LoadFrom($SelectedVersion.Path + "\ICSharpCode.SharpZipLib.dll") | Out-Null;
+$FileStream = [System.IO.File]::Create($TempDir+"\designpackage.tar.gz");
+$GZipStream = [ICSharpCode.SharpZipLib.GZip.GZipOutputStream]::new($FileStream);
+$TarArchive = [ICSharpCode.SharpZipLib.Tar.TarArchive]::CreateOutputTarArchive($GZipStream);
+
+$TarEntry = [ICSharpCode.SharpZipLib.Tar.TarEntry]::CreateEntryFromFile($TempDir+"\designfiles");
+$TarEntry.Name = $CompileID;
+$TarArchive.WriteEntry($TarEntry, $true);
+$TarArchive.Close();
+#>
+
+
+Function _INT_AddFilesToArchive {
+    param(
+        [Parameter(mandatory)] [String] $Path,
+        [Parameter(mandatory)] [String] $RootPath,
+        [Parameter(mandatory)] [ICSharpCode.SharpZipLib.Tar.TarArchive] $Archive
+    )
+    $Entry = [ICSharpCode.SharpZipLib.Tar.TarEntry]::CreateEntryFromFile($Path);
+    $Entry.Name = $Path.replace($RootPath, "").TrimStart('\').replace("\","/");
+    $Archive.WriteEntry($Entry, $false);
+
+    $DirList = Get-ChildItem -Path $Path;
+    foreach($Child in $DirList) {
+        if($Child -is [System.IO.DirectoryInfo]) {
+            _INT_AddFilesToArchive $Child.FullName $RootPath $Archive;
+        } else {
+            $Entry = [ICSharpCode.SharpZipLib.Tar.TarEntry]::CreateEntryFromFile($Child.FullName);
+            $Entry.Name = $Child.FullName.replace($RootPath, "").TrimStart('\').replace("\","/");
+            $Archive.WriteEntry($Entry, $false);
+        }
+    }
 }
 
 Function Push-QSYSDesign {
@@ -1366,8 +1433,12 @@ PS> Push-QSYSDesign -Session $qs -File .\MyDesignFile.qsys
         [switch] $AllowNewerDesigner
     );
 
-    # Determine which version of Designer to use
+    if(-not(Test-Path $File -PathType Leaf)) {
+        Write-Error "Design file not found."
+        return;
+    }
 
+    # Determine which version of Designer to use
     $FileVersion = _INT_GetDesignFileVersion -File $File;
     $DesignerVersions = _INT_GetDesignerVersions;
 
@@ -1400,12 +1471,14 @@ PS> Push-QSYSDesign -Session $qs -File .\MyDesignFile.qsys
     # Compile design file
 
     $TempDir = (Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid()));
+    $TempFilesDir = Join-Path $TempDir "\designfiles\temp";
     Write-Output "", ("Creating working directory (" + $TempDir + ")...");
-    New-Item -ItemType Directory -Path $TempDir | Out-Null;
+    # New-Item -ItemType Directory -Path $TempDir | Out-Null;
     New-Item -ItemType Directory -Path ($TempDir + "\designfiles\temp") | Out-Null;
 
+    $DesignName = (Get-Item $File).Basename;
     Write-Output ""
-    Write-Host -NoNewline "Starting compile...";
+    Write-Host -NoNewline "Starting compile of ${DesignName}...";
 
     Start-Process `
         -Wait `
@@ -1417,6 +1490,8 @@ PS> Push-QSYSDesign -Session $qs -File .\MyDesignFile.qsys
         Write-Output " failed.";
         return;
     }
+
+    Copy-Item -Path $File -Destination "${TempFilesDir}\design.idf";
 
     $CompileID = Get-Content -Path $CompileIDFilePath;
     Write-Output " done",("Compile ID is " + $CompileID + ".");
@@ -1433,14 +1508,13 @@ PS> Push-QSYSDesign -Session $qs -File .\MyDesignFile.qsys
     $GZipStream = [ICSharpCode.SharpZipLib.GZip.GZipOutputStream]::new($FileStream);
     $TarArchive = [ICSharpCode.SharpZipLib.Tar.TarArchive]::CreateOutputTarArchive($GZipStream);
 
-    $TarArchive.RootPath = ($TempDir+"\designfiles").Replace('\\', '/');
-    if ($TarArchive.RootPath.EndsWith("/")) {
-        $TarArchive.RootPath = $TarArchive.RootPath.Remove($TarArchive.RootPath.Length - 1);
-    }
-
-    $TarEntry = [ICSharpCode.SharpZipLib.Tar.TarEntry]::CreateEntryFromFile($TempDir+"\designfiles");
+    <#$TarEntry = [ICSharpCode.SharpZipLib.Tar.TarEntry]::CreateEntryFromFile($TempDir+"\designfiles");
     $TarEntry.Name = $CompileID;
-    $TarArchive.WriteEntry($TarEntry, $true);
+    $TarArchive.WriteEntry($TarEntry, $true);#>
+
+    $DesignFiles = Join-Path -Path $TempDir -ChildPath "designfiles";
+    $DesignContents = Join-Path -Path $DesignFiles -ChildPath $CompileID;
+    _INT_AddFilesToArchive $DesignContents $DesignFiles $TarArchive;
 
     $TarArchive.Close();
 
@@ -1458,7 +1532,18 @@ PS> Push-QSYSDesign -Session $qs -File .\MyDesignFile.qsys
     _INT_StopDesign -Session $Session;
 
     # Upload files
-    $Session.UploadDesign($CompileID, $Package);
+    Write-Output "";
+    Write-Host -NoNewline "Uploading design... ";
+    $UploadResult = $Session.UploadDesign($CompileID, $DesignName, $Package);
+    if($UploadResult) {
+        Write-Output "done";
+    } else {
+        Write-Output "failed.";
+        return;
+    }
+
+    Write-Output "";
+    _INT_StartDesign -Session $Session;
 
 }
 
